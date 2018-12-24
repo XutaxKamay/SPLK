@@ -40,7 +40,8 @@ void replace_sys_call_table( void )
 	swap_endian( bytes_of_syscalltable, sizeof( bytes_of_syscalltable ) - 1 );
 	bytes_of_syscalltable[ sizeof( g_sys_call_table ) * 2 ] = '\0';
 
-	c_printk( "sys_call_table (swapped endian): 0x%s\n", bytes_of_syscalltable );
+	c_printk( "sys_call_table (swapped endian): 0x%s\n",
+			  bytes_of_syscalltable );
 }
 
 void update_sys_call_table_addr( void )

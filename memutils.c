@@ -387,11 +387,11 @@ int scan_task( struct task_struct* task,
 		}
 
 		ret = scan_pattern( ( unsigned long ) copied_user_memory,
-							  ( unsigned long ) copied_user_memory
-							  + ( vma->vm_end - vma->vm_start ),
-							  pattern,
-							  len,
-							  buf );
+							( unsigned long ) copied_user_memory
+							+ ( vma->vm_end - vma->vm_start ),
+							pattern,
+							len,
+							buf );
 
 		if ( ret )
 			return ret;
