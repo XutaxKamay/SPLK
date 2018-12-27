@@ -25,12 +25,21 @@
 #include <linux/fs_struct.h>
 #include <linux/version.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/ftrace.h>
+
+#include <trace/syscall.h>
+#include <trace/events/syscalls.h>
+
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
 #include <asm/tlbflush.h>
 #include <asm/syscalls.h>
+#include <asm/syscall.h>
 #include <asm/pgtable_types.h>
+
+
 #ifdef __PAGETABLE_P4D_FOLDED
 #include <linux/sched/mm.h>
 #endif

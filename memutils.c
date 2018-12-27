@@ -157,70 +157,6 @@ void c_print_vmas( struct task_struct* task )
 	}
 }
 
-int page_add_prot( unsigned long address, pteval_t prot )
-{
-	pte_t* pte;
-	int level;
-
-	pte = NULL;
-	pte = lookup_address( address, &level );
-
-	if ( pte == NULL )
-		return 0;
-
-	pte->pte |= prot;
-
-	return 1;
-}
-
-int page_rm_prot( unsigned long address, pteval_t prot )
-{
-	pte_t* pte;
-	int level;
-
-	pte = NULL;
-	pte = lookup_address( address, &level );
-
-	if ( pte == NULL )
-		return 0;
-
-	pte->pte &= ~prot;
-
-	return 1;
-}
-
-int set_page_prot( unsigned long address, pteval_t pteval )
-{
-	pte_t* pte;
-	int level;
-
-	pte = NULL;
-	pte = lookup_address( address, &level );
-
-	if ( pte == NULL )
-		return 0;
-
-	pte->pte = pteval;
-
-	return 1;
-}
-
-pteval_t get_page_prot( unsigned long address )
-{
-	pte_t* pte;
-	int level;
-
-	pte = NULL;
-	pte = lookup_address( address, &level );
-
-	if ( pte == NULL )
-	{
-		return 0;
-	}
-
-	return pte->pte;
-}
-
 struct task_struct* find_task_from_addr( unsigned long address )
 {
 	struct task_struct* task;
@@ -252,27 +188,17 @@ int scan_pattern( unsigned long start,
 	if ( buf == NULL )
 		return 0;
 
-	if ( buf->addr != NULL )
-	{
-		kfree( buf->addr );
-		buf->size = 0;
-		buf->addr = NULL;
-	}
-
 	while ( start < end )
 	{
 		iter = start;
 
-		// Ignore null terminated char. ( len - 1 )
-		for ( pattern_c = pattern; pattern_c < pattern + ( len - 1 );
-			  pattern_c++ )
+		for ( pattern_c = pattern; pattern_c < pattern + len; pattern_c += 3 )
 		{
-			// Unknown byte.
-			if ( *pattern_c == ' ' || *pattern_c == '?'
-				 || *( char* ) ( ( unsigned long ) pattern_c + 1 ) == ' '
-				 || *( char* ) ( ( unsigned long ) pattern_c + 1 ) == '?' )
+			// If it's an unknown byte, we skip the byte.
+			if ( *pattern_c == '?'
+				 && *( char* ) ( ( unsigned long ) pattern_c + 1 ) == '?' )
 			{
-				pattern_c++;
+				iter++;
 				continue;
 			}
 
@@ -285,7 +211,7 @@ int scan_pattern( unsigned long start,
 
 			if ( pattern_byte == 0x100 )
 			{
-				c_printk( "wrong pattern (%lX): %s\n",
+				c_printk( "wrong pattern (%li): %s\n",
 						  ( unsigned long ) pattern_c
 						  - ( unsigned long ) pattern,
 						  pattern );
@@ -310,6 +236,8 @@ int scan_pattern( unsigned long start,
 				c_printk( "kmalloc failed: with pattern\n%s\n", pattern );
 				return 0;
 			}
+
+			*( unsigned long* ) ( buf->addr ) = start;
 		}
 		else
 		{
@@ -318,22 +246,27 @@ int scan_pattern( unsigned long start,
 
 			if ( buf->addr == NULL )
 			{
-				c_printk( "krealloc failed: with pattern"
-						  "\n%s\n",
-						  pattern );
+				c_printk( "krealloc failed: with pattern \n%s\n", pattern );
 
 				return 0;
 			}
 
-			*( unsigned long* ) ( buf->addr - sizeof( void* ) ) = iter;
+			*( unsigned long* ) ( buf->addr - sizeof( void* ) ) = start;
 		}
 
 	dontmatch:
 		start++;
 	}
 
-	c_printk( "didn't find pattern\n%s\n", pattern );
-	return 0;
+	if ( buf->addr == NULL )
+	{
+		c_printk( "didn't find pattern\n%s\n", pattern );
+		return 0;
+	}
+	else
+	{
+		return 1;
+	}
 }
 
 int scan_task( struct task_struct* task,
@@ -430,8 +363,7 @@ int scan_kernel( char* start,
 		addr_end = swap;
 	}
 
-	c_printk( "scanning with start - end addr:"
-			  " %lX - %lX\n",
+	c_printk( "scanning with start - end addr: %lX - %lX\n",
 			  addr_start,
 			  addr_end );
 
@@ -456,15 +388,13 @@ unsigned long map_base_task( struct task_struct* task )
 
 	if ( mm == NULL )
 	{
-		c_printk( "couldn't find base address of"
-				  " %s(%i)\n",
+		c_printk( "couldn't find base address of %s(%i)\n",
 				  task->comm,
 				  task->pid );
 		return 0;
 	}
 
-	c_printk( "found base address of"
-			  " %s(%i) (%lX)\n",
+	c_printk( "found base address of %s(%i) (%lX)\n",
 			  task->comm,
 			  task->pid,
 			  mm->mmap_base );

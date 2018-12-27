@@ -4,10 +4,11 @@ int init_mod( void );
 void free_mod( void );
 
 unsigned long* g_sys_call_table = NULL;
+unsigned long* new_sys_call_table = NULL;
 
-EXPORT_SYMBOL( g_sys_call_table );
+EXPORT_SYMBOL( new_sys_call_table );
 
-int get_count_syscalls( void )
+int get_count_syscalls( unsigned long* table )
 {
 	int count_syscalls, level;
 
@@ -15,11 +16,10 @@ int get_count_syscalls( void )
 
 	while ( true )
 	{
-		if ( g_sys_call_table[ count_syscalls ] == 0 )
+		if ( table[ count_syscalls ] == 0 )
 			break;
 
-		if ( lookup_address( g_sys_call_table[ count_syscalls ], &level )
-			 == NULL )
+		if ( lookup_address( table[ count_syscalls ], &level ) == NULL )
 			break;
 
 		count_syscalls++;
@@ -30,30 +30,101 @@ int get_count_syscalls( void )
 
 void replace_sys_call_table( void )
 {
-	// size of pointer * 2 (each bytes contains 2 chars) + 1 for null terminated
-	// string.
-	char bytes_of_syscalltable[ sizeof( g_sys_call_table ) * 2 + 1 ];
-	sprintf( bytes_of_syscalltable, "%lX", ( unsigned long ) g_sys_call_table );
+	unsigned long do_syscall_64;
+	unsigned long edo_syscall_64;
+	char* pattern_g_syscalltable;
+	unsigned long to_change, ra_syscalltable;
+	int count;
+	struct buffer_struct buf;
+	pteval_t oldpteval;
+	pte_t* pte;
+	int level;
 
-	c_printk( "sys_call_table (old endian): 0x%s\n", bytes_of_syscalltable );
+	to_change = 0;
+	count = 0;
+	do_syscall_64 = kallsyms_lookup_name( "do_syscall_64" );
+	edo_syscall_64 = do_syscall_64 + PAGE_SIZE;
+	pattern_g_syscalltable = "48 8B 4B 38 48 8B 73 68";
+	memset( &buf, 0, sizeof( buf ) );
 
-	swap_endian( bytes_of_syscalltable, sizeof( bytes_of_syscalltable ) - 1 );
-	bytes_of_syscalltable[ sizeof( g_sys_call_table ) * 2 ] = '\0';
+	if ( scan_pattern( do_syscall_64,
+					   edo_syscall_64,
+					   pattern_g_syscalltable,
+					   strlen( pattern_g_syscalltable ) - 1,
+					   &buf ) == 1 )
+	{
+		to_change = ( *( unsigned long* ) buf.addr ) - 4;
+		count = get_count_syscalls( g_sys_call_table );
 
-	c_printk( "sys_call_table (swapped endian): 0x%s\n",
-			  bytes_of_syscalltable );
+		// Let's reserve some space in the kernel code. We can safely use the
+		// init segment as it just used at kernel init. We should check also if
+		// we don't exceed the maximum memory we can allocate because it might
+		// overwrite some segments we don't want to.
+		new_sys_call_table = ( void* ) kallsyms_lookup_name( "_sinittext" );
+
+		c_printk( "asking to reverse space at: %lX\n",
+				  ( unsigned long ) new_sys_call_table );
+
+		pte = lookup_address( ( unsigned long ) new_sys_call_table, &level );
+
+		if ( pte != NULL )
+		{
+			oldpteval = pte->pte;
+			pte->pte |= _PAGE_RW;
+
+			memcpy( new_sys_call_table,
+					g_sys_call_table,
+					count * sizeof( void* ) );
+
+			pte->pte = oldpteval;
+
+			c_printk(
+			"found new_sys_call_table (address of address: 0x%lX) address at: "
+			"0x%lX (first index: 0x%lX) count: %i\n",
+			( unsigned long ) &new_sys_call_table,
+			*( unsigned long* ) &new_sys_call_table,
+			new_sys_call_table[ 0 ],
+			get_count_syscalls( new_sys_call_table ) );
+
+			pte = lookup_address( to_change, &level );
+
+			if ( pte != NULL )
+			{
+				ra_syscalltable = ( unsigned long ) new_sys_call_table &
+				0xFFFFFFFF;
+
+				oldpteval = pte->pte;
+				pte->pte |= _PAGE_RW;
+
+				memcpy( ( void* ) to_change, &ra_syscalltable, 4 );
+
+				pte->pte = oldpteval;
+				c_printk( "changed instructions\n" );
+			}
+			else
+			{
+				c_printk( "failed to get page to change instruction\n" );
+			}
+		}
+		else
+		{
+			c_printk( "failed to create new sys call table\n" );
+		}
+
+		// 48 8B 04 D5 00 04 00 03
+		for ( count = 0; count < 8; count++ )
+		{
+			pr_cont( "%02X ", *( unsigned char* ) ( to_change + count ) );
+		}
+
+		pr_cont( "\n" );
+	}
 }
 
 void update_sys_call_table_addr( void )
 {
-	pteval_t old_pte;
-
-	c_printk(
-	"task map base: %lX\n",
-	map_base_task( find_task_from_addr( ( unsigned long ) init_module ) ) );
-
-	g_sys_call_table
-	= ( unsigned long* ) kallsyms_lookup_name( "sys_call_table" );
+	g_sys_call_table = ( unsigned long* ) kallsyms_lookup_name(
+	"sys_call_table" );
 
 	c_printk( "kernel module loaded. test: 0x%02X, kernel .text: 0x%lX\n",
 			  hex_char_to_byte( 'F', '3' ),
@@ -67,26 +138,9 @@ void update_sys_call_table_addr( void )
 			  ( unsigned long ) &g_sys_call_table,
 			  *( unsigned long* ) &g_sys_call_table,
 			  g_sys_call_table[ 0 ],
-			  get_count_syscalls() );
-
-	old_pte = get_page_prot( ( unsigned long ) g_sys_call_table );
-
-	if ( !old_pte )
-		goto out;
-
-	c_printk( "sys_call_table: got old prots\n" );
-
-	if ( !page_add_prot( ( unsigned long ) g_sys_call_table, _PAGE_RW ) )
-		goto out;
-
-	c_printk( "sys_call_table: page prots has been changed\n" );
+			  get_count_syscalls( g_sys_call_table ) );
 
 	replace_sys_call_table();
-
-	if ( !set_page_prot( ( unsigned long ) g_sys_call_table, old_pte ) )
-		goto out;
-
-	c_printk( "sys_call_table: reset prots\n" );
 
 out:
 	return;
