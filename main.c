@@ -49,6 +49,7 @@ void replace_sys_call_table(void)
 	if (scan_pattern(do_syscall_64, edo_syscall_64, pattern_g_syscalltable,
 			 strlen(pattern_g_syscalltable) - 1, &buf) == 1) {
 		to_change = (*(unsigned long *)buf.addr) - 4;
+		kfree(buf.addr);
 		count = get_count_syscalls(g_sys_call_table);
 
 		// Let's reserve some space in the kernel code. We can safely use the
@@ -57,7 +58,7 @@ void replace_sys_call_table(void)
 		// overwrite some segments we don't want to.
 		new_sys_call_table = (void *)kallsyms_lookup_name("_sinittext");
 
-		c_printk("asking to reverse space at: %lX\n",
+		c_printk("getting space at: %lX\n",
 			 (unsigned long)new_sys_call_table);
 
 		pte = lookup_address((unsigned long)new_sys_call_table, &level);
@@ -68,6 +69,9 @@ void replace_sys_call_table(void)
 
 			memcpy(new_sys_call_table, g_sys_call_table,
 			       count * sizeof(void *));
+
+			// Say that we finished our table.
+			new_sys_call_table[count] = NULL;
 
 			pte->pte = oldpteval;
 
@@ -108,6 +112,11 @@ void replace_sys_call_table(void)
 
 		pr_cont("\n");
 	}
+}
+
+void replace_sys_count_cmps(void)
+{
+	const char *p_sct_count[] = { "", "", "" };
 }
 
 void update_sys_call_table_addr(void)
